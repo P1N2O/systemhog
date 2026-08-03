@@ -79,15 +79,17 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y ${{ matrix.pkgs }}
       - name: Add target
         run: rustup target add ${{ matrix.target }}
+      # riscv64gc-unknown-linux-musl's target spec emits -lgcc_s with no
+      # libgcc shipped; an empty stub satisfies it. Only relevant on Linux.
+      - name: Prepare riscv64 stub
+        if: ${{ matrix.target == 'riscv64gc-unknown-linux-musl' }}
+        run: |
+          mkdir -p /tmp/riscv-stub
+          ar cr /tmp/riscv-stub/libgcc_s.a
       - name: Build
         env:
           RUSTFLAGS: ${{ matrix.flags }}
-        run: |
-          if [[ "${{ matrix.target }}" == riscv64gc* ]]; then
-            mkdir -p /tmp/riscv-stub
-            ar cr /tmp/riscv-stub/libgcc_s.a
-          fi
-          cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }}
       - name: Rename artifact
         shell: bash
         run: |
