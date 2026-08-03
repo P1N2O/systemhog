@@ -12,7 +12,7 @@ mod imp {
 
     static STOP: AtomicBool = AtomicBool::new(false);
 
-    extern "C" {
+    unsafe extern "C" {
         fn signal(signum: i32, handler: usize) -> usize;
         fn geteuid() -> u32;
         fn flock(fd: i32, operation: i32) -> i32;

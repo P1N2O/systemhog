@@ -89,7 +89,7 @@ mod imp {
     // libc marks mach_host_self as deprecated ("use mach2"); it is a
     // trivial thunk, so declare it directly to keep the dependency set
     // at zero for this platform too.
-    extern "C" {
+    unsafe extern "C" {
         fn mach_host_self() -> libc::mach_port_t;
     }
 
