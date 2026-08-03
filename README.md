@@ -2,8 +2,7 @@
 
 A CPU and RAM resource maintainer that holds system usage at your
 configured levels — for load testing, benchmarks, or just keeping a
-machine busy. Pure Rust, zero dependencies, one small static musl binary
-for Linux (x86_64, aarch64, armv7, i686, riscv64).
+machine busy. Pure Rust, zero dependencies, one small static binary.
 
 ## Features
 
@@ -47,12 +46,12 @@ installs and starts the service.
 All locations are unified — root or non-root, every command and the
 service use the same paths:
 
-|       | location                        |
-| ----- | ------------------------------- |
-| binary | `/usr/local/bin/systemhog`      |
-| config | `/etc/systemhog/config.conf`    |
-| lock   | `/run/systemhog-<name>.lock`    |
-| log    | `/var/log/systemhog.log`        |
+|        | location                     |
+| ------ | ---------------------------- |
+| binary | `/usr/local/bin/systemhog`   |
+| config | `/etc/systemhog/config.conf` |
+| lock   | `/run/systemhog-<name>.lock` |
+| log    | `/var/log/systemhog.log`     |
 
 Setup (install, init, service management, update) needs root. The
 **binary itself runs as any user**: `systemhog status` reads the
@@ -132,14 +131,14 @@ system-wide (`/etc/systemhog/config.conf`), so init needs root.
 
 Pressing Enter accepts the defaults — no typing needed:
 
-| setting        | default                        |
-| -------------- | ------------------------------ |
-| service name   | `systemhog`                    |
-| CPU min        | 10%                            |
-| CPU max        | 20%                            |
-| RAM target     | 10%                            |
-| check interval | 5 s                            |
-| log file       | `/var/log/systemhog.log`       |
+| setting        | default                  |
+| -------------- | ------------------------ |
+| service name   | `systemhog`              |
+| CPU min        | 10%                      |
+| CPU max        | 20%                      |
+| RAM target     | 10%                      |
+| check interval | 5 s                      |
+| log file       | `/var/log/systemhog.log` |
 
 `systemhog init --yes` writes exactly these defaults without prompting.
 
@@ -235,11 +234,11 @@ LOG_FILE = /var/log/systemhog.log
 
 One set of paths for everyone — root or not:
 
-|       | location                     |
-| ----- | ---------------------------- |
-| config | `/etc/systemhog/config.conf` |
+|        | location                                                    |
+| ------ | ----------------------------------------------------------- |
+| config | `/etc/systemhog/config.conf`                                |
 | lock   | `/run/systemhog-<name>.lock` (root) or `$TMPDIR` (non-root) |
-| log    | `/var/log/systemhog.log`     |
+| log    | `/var/log/systemhog.log`                                    |
 
 Override with `LOG_FILE` (or the wizard's log-file prompt). A non-writable
 log path falls back to stderr-only logging with a warning. Config edits
