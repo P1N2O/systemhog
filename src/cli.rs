@@ -7,8 +7,22 @@ use crate::log::Logger;
 use crate::metrics;
 use crate::sys;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// Load the config, printing a consistent error + hint on failure. The
+/// hint adapts to the scope: root installs need sudo, user installs don't.
+fn load_config(cfg_path: &Path) -> Result<Config, i32> {
+    match config::load(cfg_path) {
+        Ok(cfg) => Ok(cfg),
+        Err(e) => {
+            eprintln!("error: {e}");
+            let init = if sys::is_root() { "sudo systemhog init" } else { "systemhog init" };
+            eprintln!("hint: run `{init}` to create a configuration");
+            Err(1)
+        }
+    }
+}
 
 fn parse_common(args: &[String]) -> (Option<PathBuf>, bool) {
     let mut path = None;
@@ -143,6 +157,11 @@ pub fn init(args: &[String]) -> i32 {
 
     if let Err(e) = config::write(&cfg_path, &cfg) {
         eprintln!("error: {e}");
+        let init = if sys::is_root() { "sudo systemhog init" } else { "systemhog init" };
+        eprintln!(
+            "hint: the config lives at {}; run `{init}` to write it",
+            cfg_path.display()
+        );
         return 1;
     }
     println!("configuration written to {}", cfg_path.display());
@@ -154,7 +173,12 @@ pub fn init(args: &[String]) -> i32 {
     println!("next steps:");
     println!("  run it now : systemhog --config {}", cfg_path.display());
     if sys::systemd::available() {
-        println!("  install    : sudo systemhog install --config {}", cfg_path.display());
+        let install = if sys::is_root() {
+            "sudo systemhog install"
+        } else {
+            "systemhog install"
+        };
+        println!("  install    : {install} --config {}", cfg_path.display());
     }
     0
 }
@@ -162,13 +186,9 @@ pub fn init(args: &[String]) -> i32 {
 pub fn run(args: &[String]) -> i32 {
     let (cfg_path, _) = parse_common(args);
     let cfg_path = cfg_path.unwrap_or_else(config::default_config_path);
-    let cfg = match config::load(&cfg_path) {
+    let cfg = match load_config(&cfg_path) {
         Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {e}");
-            eprintln!("hint: run `systemhog init` to create a configuration");
-            return 1;
-        }
+        Err(code) => return code,
     };
 
     let lock_path = if sys::is_root() {
@@ -203,12 +223,9 @@ pub fn run(args: &[String]) -> i32 {
 pub fn install(args: &[String]) -> i32 {
     let (cfg_path, _) = parse_common(args);
     let cfg_path = cfg_path.unwrap_or_else(config::default_config_path);
-    let cfg = match config::load(&cfg_path) {
+    let cfg = match load_config(&cfg_path) {
         Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return 1;
-        }
+        Err(code) => return code,
     };
     if !sys::systemd::available() {
         eprintln!("systemd not detected on this system");
@@ -232,6 +249,11 @@ pub fn install(args: &[String]) -> i32 {
             println!("  config : {}", cfg_path.display());
             println!("  logs   : journalctl -u {} -f", cfg.service_name);
             println!("           tail -f {}", cfg.log_file.display());
+            if !sys::is_root() && sys::systemd::linger_enabled() != Some(true) {
+                println!();
+                println!("note: user services stop at logout; run `sudo loginctl enable-linger`");
+                println!("      to keep `{}` running at boot without a login", cfg.service_name);
+            }
             0
         }
         Err(e) => {
@@ -244,12 +266,9 @@ pub fn install(args: &[String]) -> i32 {
 pub fn uninstall(args: &[String]) -> i32 {
     let (cfg_path, _) = parse_common(args);
     let cfg_path = cfg_path.unwrap_or_else(config::default_config_path);
-    let cfg = match config::load(&cfg_path) {
+    let cfg = match load_config(&cfg_path) {
         Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return 1;
-        }
+        Err(code) => return code,
     };
     if !sys::systemd::available() {
         eprintln!("systemd not detected on this system");
@@ -271,15 +290,22 @@ pub fn uninstall(args: &[String]) -> i32 {
     }
 }
 
+/// Check for and apply a newer release of this binary. `self-update` is
+/// an alias for the same command.
+pub fn update(args: &[String]) -> i32 {
+    let check_only = args.iter().any(|a| a == "--check");
+    let rest: Vec<String> = args.iter().filter(|a| *a != "--check").cloned().collect();
+    let (cfg_path, _) = parse_common(&rest);
+    let cfg_path = cfg_path.unwrap_or_else(config::default_config_path);
+    crate::update::run(Some(&cfg_path), check_only)
+}
+
 pub fn status(args: &[String]) -> i32 {
     let (cfg_path, _) = parse_common(args);
     let cfg_path = cfg_path.unwrap_or_else(config::default_config_path);
-    let cfg = match config::load(&cfg_path) {
+    let cfg = match load_config(&cfg_path) {
         Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return 1;
-        }
+        Err(code) => return code,
     };
     println!("service name : {}", cfg.service_name);
     println!("cpu          : {}% .. {}%", cfg.cpu_min, cfg.cpu_max);
@@ -322,10 +348,13 @@ pub fn help() {
     println!("  install     create, enable and start the systemd service");
     println!("  uninstall   stop, disable and remove the systemd service");
     println!("  status      show config, current usage and service state");
+    println!("  update      check for and apply a newer release of this binary");
+    println!("  self-update alias for update");
     println!("  version     print version information");
     println!("  help        show this help");
     println!();
     println!("OPTIONS");
     println!("  --config PATH   use an alternate configuration file");
     println!("  --yes           init: skip prompts and use defaults");
+    println!("  --check         update: report only; exit 1 when an update is available");
 }

@@ -32,27 +32,31 @@ binary per platform.
 ### One-liner (recommended)
 
 ```sh
-curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/install.sh | sudo bash
+curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/install.sh | bash
 ```
 
-The installer:
+No root needed: the installer detects OS + architecture, downloads the
+matching release binary (static musl on Linux, native on macOS),
+verifies its SHA-256 checksum (falls back to a warning if the release
+ships no checksum asset, plus an ELF/Mach-O magic check), and installs
+to `~/.local/bin/systemhog`. It then runs `systemhog init` (wizard on
+an interactive terminal, defaults otherwise) and, with systemd present,
+installs and starts the service.
 
-1. detects OS + architecture and picks the matching release binary
-   (static musl on Linux, native on macOS);
-2. downloads it and verifies the SHA-256 checksum (falls back to a warning
-   if the release ships no checksum asset, and sanity-checks the ELF/Mach-O
-   magic bytes);
-3. installs it to `/usr/local/bin/systemhog` (root) or
-   `~/.local/bin/systemhog` (non-root);
-4. sets it up — on an interactive terminal it runs the `systemhog init`
-   wizard; otherwise it writes the default config and, as root with
-   systemd, installs and starts the service automatically.
+Scope follows the invoking user:
+
+| | user install (default, no sudo) | system install (`sudo bash`) |
+| ------- | ------------------------------ | ---------------------------- |
+| binary  | `~/.local/bin/systemhog`       | `/usr/local/bin/systemhog`   |
+| config  | `~/.config/systemhog/`         | `/etc/systemhog/`            |
+| service | `systemctl --user` unit        | system unit                  |
+| log     | `~/.local/state/systemhog/`    | `/var/log/systemhog.log`     |
 
 Verify the result:
 
 ```sh
-systemhog status                # config summary + live CPU/RAM usage
-systemctl status systemhog      # service state (if it was installed)
+systemhog status                  # config summary + live CPU/RAM usage
+systemctl --user status systemhog # service state (user install)
 ```
 
 Overrides (environment variables):
@@ -67,7 +71,7 @@ Overrides (environment variables):
 Example — pin a specific release:
 
 ```sh
-SYSTEMHOG_VERSION=0.2.0 curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/install.sh | sudo bash
+SYSTEMHOG_VERSION=0.2.0 curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/install.sh | bash
 ```
 
 ### Manual
@@ -79,8 +83,10 @@ each). Download, make executable, put on PATH:
 ```sh
 curl -fsSL -o systemhog https://github.com/p1n2o/systemhog/releases/latest/download/systemhog-x86_64-unknown-linux-musl
 chmod +x systemhog
-sudo mv systemhog /usr/local/bin/
+mkdir -p ~/.local/bin && mv systemhog ~/.local/bin/
 systemhog version
+systemhog init --yes    # write the default user config (~/.config/systemhog)
+systemhog status
 ```
 
 Or build from source — see [Building](#building).
@@ -97,12 +103,15 @@ systemhog [command] [options]
   install     create, enable and start the systemd service
   uninstall   stop, disable and remove the systemd service
   status      show config, current usage and service state
+  update      check for and apply a newer release of this binary
+  self-update alias for update
   version     print version information
   help        show this help
 
 Options:
   --config PATH   use an alternate configuration file
   --yes           init: skip prompts and use defaults
+  --check         update: report only; exit 1 when an update is available
 ```
 
 ### Interactive setup
@@ -113,8 +122,12 @@ sudo systemhog init
 
 Walks through service name (used for the systemd unit), CPU usage band,
 RAM target, check interval and log file — every answer is validated —
-writes the config, then offers to install the service. Run as root for a
-system service, or as a normal user for a `systemctl --user` service.
+writes the config, then offers to install the service.
+
+Scope follows the invoking user: plain `systemhog init` writes your
+user config at `~/.config/systemhog/config.conf` (no sudo);
+`sudo systemhog init` writes the system-wide config at
+`/etc/systemhog/config.conf`.
 
 Pressing Enter accepts the defaults — no typing needed:
 
@@ -131,16 +144,45 @@ Pressing Enter accepts the defaults — no typing needed:
 
 ### Service management (systemd)
 
+User scope — no sudo:
+
 ```sh
-sudo systemhog install                # write unit, enable --now, start
-systemctl status systemhog            # check it
-journalctl -u systemhog -f            # service logs
-tail -f /var/log/systemhog.log        # application log (platform default; also on stderr/journal)
-sudo systemhog uninstall              # stop, disable, remove the unit (config kept)
+systemhog install                # user unit in ~/.config/systemd/user, enable --now
+systemctl --user status systemhog
+journalctl --user -u systemhog -f
+sudo loginctl enable-linger      # optional: keep it running at boot without a login
+systemhog uninstall              # stop, disable, remove the unit (config kept)
+```
+
+System scope — as root:
+
+```sh
+sudo systemhog install           # system unit, enable --now, start
+systemctl status systemhog
+journalctl -u systemhog -f
+sudo systemhog uninstall         # stop, disable, remove the unit (config kept)
 ```
 
 The unit runs the same binary that invoked `install` and restarts on
-failure (`Restart=always`).
+failure (`Restart=always`). User units stop when you log out unless
+linger is enabled (`sudo loginctl enable-linger $USER`).
+
+### Updating
+
+```sh
+systemhog update          # check, download, verify, replace, restart
+systemhog self-update     # same thing
+systemhog update --check  # report only; exit 1 when an update is available
+```
+
+`update` asks GitHub for the newest release, downloads the binary for
+this platform, verifies its SHA-256 checksum (when the release ships
+one), replaces the running binary in place, and restarts the systemd
+service if it was running. It honors the same environment overrides as
+the installer (`SYSTEMHOG_REPO`, `SYSTEMHOG_VERSION`, `SYSTEMHOG_BASE_URL`)
+— pinning a version lets you upgrade or downgrade deliberately. The
+binary must be writable: a user install under `~/.local/bin` needs no
+sudo; use `sudo systemhog update` only for a system install.
 
 ### Running without systemd (macOS, Windows, containers)
 
@@ -158,7 +200,7 @@ binary itself is fully functional everywhere.
 ### Complete removal (uninstall.sh)
 
 ```sh
-curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/uninstall.sh | sudo bash
+curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/uninstall.sh | bash
 ```
 
 Removes every trace, in order:
@@ -189,7 +231,6 @@ clone itself is never touched.
 ```sh
 sudo systemhog uninstall        # stop, disable, remove the unit
 sudo rm -rf /etc/systemhog      # also drop the config/logs if desired
-                                # (or ~/.config/systemhog for a per-user install)
 ```
 
 ## Configuration
@@ -206,17 +247,20 @@ TARGET_RAM_USAGE = 10      # % of total RAM to keep used
 [SETTINGS]
 CHECK_INTERVAL = 5         # seconds between adjustments
 SERVICE_NAME = systemhog   # systemd unit name
-LOG_FILE = /var/log/systemhog.log   # Linux default; see path table below
+LOG_FILE = /var/log/systemhog.log   # root scope; ~/.local/state for user scope
 ```
 
-Paths: config `/etc/systemhog/config.conf` (root) or
-`~/.config/systemhog/config.conf` (non-root); lock
-`/run/systemhog-<name>.lock` (root) or `$TMPDIR` (non-root). The default
-log location is platform-specific:
+Paths follow the install scope:
+
+| | root / system install | user install |
+| ----- | --------------------- | ------------ |
+| config | `/etc/systemhog/config.conf` | `~/.config/systemhog/config.conf` |
+| lock | `/run/systemhog-<name>.lock` | `$TMPDIR` |
+| log | `/var/log/systemhog.log` | `~/.local/state/systemhog/systemhog.log` |
 
 | platform   | default log                               |
 | ---------- | ----------------------------------------- |
-| Linux      | `/var/log/systemhog.log`                  |
+| Linux      | `/var/log/systemhog.log` (root) / `~/.local/state/systemhog/systemhog.log` (user) |
 | macOS      | `~/Library/Logs/systemhog.log`            |
 | Windows    | `%LOCALAPPDATA%\systemhog\systemhog.log`  |
 | other Unix | `$XDG_STATE_HOME/systemhog/systemhog.log` |

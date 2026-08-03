@@ -129,8 +129,10 @@ pub fn write(path: &Path, cfg: &Config) -> Result<(), String> {
     std::fs::write(path, to_ini(cfg)).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
-/// Config lives in /etc/systemhog as root (never /root), or under the
-/// user's XDG config dir otherwise.
+/// One config location per scope: `/etc/systemhog/config.conf` for
+/// system-wide (root) installs, `~/.config/systemhog/config.conf` for
+/// user installs. The installer and every command follow the invoking
+/// user's scope, so a fully user-space setup needs no sudo at all.
 pub fn default_config_path() -> PathBuf {
     if crate::sys::is_root() {
         PathBuf::from("/etc/systemhog/config.conf")
@@ -139,15 +141,20 @@ pub fn default_config_path() -> PathBuf {
     }
 }
 
-/// Platform-appropriate default log location:
-///   Linux   : /var/log/systemhog.log (root-owned, as designed)
-///   macOS   : ~/Library/Logs/systemhog.log (user-writable, no root needed)
-///   Windows : %LOCALAPPDATA%\systemhog\systemhog.log (per-user app data)
-///   other   : XDG state dir
+/// Platform- and scope-appropriate default log location:
+///   Linux, root : /var/log/systemhog.log
+///   Linux, user : XDG state dir (~/.local/state/systemhog/systemhog.log)
+///   macOS       : ~/Library/Logs/systemhog.log (user-writable, no root needed)
+///   Windows     : %LOCALAPPDATA%\systemhog\systemhog.log (per-user app data)
+///   other       : XDG state dir
 pub fn default_log_path() -> PathBuf {
     #[cfg(target_os = "linux")]
     {
-        PathBuf::from("/var/log/systemhog.log")
+        if crate::sys::is_root() {
+            PathBuf::from("/var/log/systemhog.log")
+        } else {
+            user_state_log()
+        }
     }
     #[cfg(target_os = "macos")]
     {
@@ -163,14 +170,27 @@ pub fn default_log_path() -> PathBuf {
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
-        std::env::var_os("XDG_STATE_HOME")
-            .map(|d| PathBuf::from(d).join("systemhog").join("systemhog.log"))
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(|h| PathBuf::from(h).join(".local/state/systemhog/systemhog.log"))
-            })
-            .unwrap_or_else(|| PathBuf::from("systemhog.log"))
+        user_state_log()
     }
+}
+
+/// XDG state dir default: $XDG_STATE_HOME/systemhog/systemhog.log, or
+/// ~/.local/state/systemhog/systemhog.log, or the bare filename.
+fn user_state_log() -> PathBuf {
+    std::env::var_os("XDG_STATE_HOME")
+        .map(|d| PathBuf::from(d).join("systemhog").join("systemhog.log"))
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|h| PathBuf::from(h).join(".local/state/systemhog/systemhog.log"))
+        })
+        .unwrap_or_else(|| PathBuf::from("systemhog.log"))
+}
+
+#[cfg(windows)]
+fn base_config_dir() -> PathBuf {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 #[cfg(unix)]
@@ -179,13 +199,6 @@ fn base_config_dir() -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"))
-}
-
-#[cfg(windows)]
-fn base_config_dir() -> PathBuf {
-    std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 #[cfg(test)]
@@ -240,13 +253,25 @@ mod tests {
         assert_eq!(c.log_file, Config::default().log_file);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn default_config_matches_scope() {
+        if crate::sys::is_root() {
+            assert_eq!(default_config_path(), PathBuf::from("/etc/systemhog/config.conf"));
+        } else {
+            assert!(default_config_path().ends_with("systemhog/config.conf"));
+            assert!(!default_config_path().starts_with("/etc"));
+        }
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
-    fn linux_default_log_is_var_log() {
-        assert_eq!(
-            Config::default().log_file,
-            PathBuf::from("/var/log/systemhog.log")
-        );
+    fn linux_default_log_matches_scope() {
+        if crate::sys::is_root() {
+            assert_eq!(Config::default().log_file, PathBuf::from("/var/log/systemhog.log"));
+        } else {
+            assert!(Config::default().log_file.ends_with("systemhog/systemhog.log"));
+        }
     }
 
     #[test]

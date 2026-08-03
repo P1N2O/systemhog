@@ -192,6 +192,32 @@ pub mod systemd {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_else(|_| "unknown".into())
     }
+
+    pub fn restart(name: &str) -> Result<(), String> {
+        if is_root() {
+            systemctl(&["restart", name])
+        } else {
+            systemctl(&["--user", "restart", name])
+        }
+    }
+
+    /// Whether the invoking user's user-manager lingers after logout
+    /// (user services keep running at boot without a login). None when
+    /// logind is unavailable or the answer is unknown.
+    pub fn linger_enabled() -> Option<bool> {
+        let user = std::env::var("USER").ok()?;
+        let out = Command::new("loginctl")
+            .args(["show-user", "-p", "Linger", &user])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .strip_prefix("Linger=")
+            .map(|v| v == "yes")
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -212,5 +238,13 @@ pub mod systemd {
 
     pub fn is_active(_name: &str) -> String {
         "n/a".into()
+    }
+
+    pub fn restart(_name: &str) -> Result<(), String> {
+        Err("systemd services are only supported on Linux".into())
+    }
+
+    pub fn linger_enabled() -> Option<bool> {
+        None
     }
 }

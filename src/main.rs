@@ -4,6 +4,7 @@ mod log;
 mod metrics;
 mod pump;
 mod sys;
+mod update;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -15,6 +16,7 @@ fn main() {
         "install" => cli::install(rest),
         "uninstall" => cli::uninstall(rest),
         "status" => cli::status(rest),
+        "update" | "self-update" => cli::update(rest),
         "version" | "-V" | "--version" => {
             println!("systemhog {}", env!("CARGO_PKG_VERSION"));
             0

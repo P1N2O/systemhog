@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # systemhog installer — run with:
-#   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | sudo bash
+#   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | bash
 #
 # Detects OS/arch, downloads the matching release binary, verifies its
 # SHA-256 checksum, installs it, and sets up configuration + the systemd
-# service. On an interactive terminal it runs the setup wizard; otherwise
-# it writes the default config and (as root, with systemd) installs and
-# starts the service automatically.
+# service. Scope follows the invoking user: as root it installs
+# system-wide (config in /etc/systemhog, system unit); as a normal user
+# everything stays in user space (~/.local/bin, ~/.config/systemhog,
+# systemctl --user unit) — no sudo required. On an interactive terminal
+# it runs the setup wizard; otherwise it writes the default config and
+# installs/starts the service automatically.
 #
 # Overridable via environment:
 #   SYSTEMHOG_REPO       github owner/repo  (default: p1n2o/systemhog)
@@ -119,13 +122,15 @@ fi
 say "==> installed $DEST ($("$DEST" version))"
 
 # --- configure + service --------------------------------------------------
+# Scope follows the invoking user: root installs are system-wide, user
+# installs are per-user (user config + systemctl --user unit).
 if [ -t 0 ]; then
     say "==> interactive setup"
     "$DEST" init
 else
     say "==> writing default configuration"
     "$DEST" init --yes
-    if [ "$(id -u)" = 0 ] && [ -d /run/systemd/system ]; then
+    if [ -d /run/systemd/system ]; then
         say "==> installing systemd service"
         if "$DEST" install; then
             say "    service installed and started"
@@ -133,8 +138,8 @@ else
             say "warning: service install failed (run: $DEST install)" >&2
         fi
     else
-        say "    not root or no systemd; skipping service install"
-        say "    to enable later: sudo $DEST install"
+        say "    no systemd; skipping service install"
+        say "    to enable later: $DEST install"
     fi
 fi
 
@@ -142,4 +147,4 @@ say
 say "systemhog is installed."
 say "  binary : $DEST"
 say "  status : $DEST status"
-say "  remove : curl -fsSL $BASE_URL/uninstall.sh | sudo bash"
+say "  remove : curl -fsSL $BASE_URL/uninstall.sh | bash"
