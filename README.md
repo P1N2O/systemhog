@@ -32,7 +32,7 @@ binary per platform.
 ### One-liner (recommended)
 
 ```sh
-curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/install.sh | sudo bash
 ```
 
 No root needed: the installer detects OS + architecture, downloads the
@@ -45,12 +45,12 @@ installs and starts the service.
 
 Scope follows the invoking user:
 
-| | user install (default, no sudo) | system install (`sudo bash`) |
-| ------- | ------------------------------ | ---------------------------- |
-| binary  | `~/.local/bin/systemhog`       | `/usr/local/bin/systemhog`   |
-| config  | `~/.config/systemhog/`         | `/etc/systemhog/`            |
-| service | `systemctl --user` unit        | system unit                  |
-| log     | `~/.local/state/systemhog/`    | `/var/log/systemhog.log`     |
+|         | user install (default, no sudo) | system install (`sudo bash`) |
+| ------- | ------------------------------- | ---------------------------- |
+| binary  | `~/.local/bin/systemhog`        | `/usr/local/bin/systemhog`   |
+| config  | `~/.config/systemhog/`          | `/etc/systemhog/`            |
+| service | `systemctl --user` unit         | system unit                  |
+| log     | `~/.local/state/systemhog/`     | `/var/log/systemhog.log`     |
 
 Verify the result:
 
@@ -71,7 +71,7 @@ Overrides (environment variables):
 Example — pin a specific release:
 
 ```sh
-SYSTEMHOG_VERSION=0.2.0 curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/install.sh | bash
+SYSTEMHOG_VERSION=0.2.0 curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/install.sh | sudo bash
 ```
 
 ### Manual
@@ -200,7 +200,7 @@ binary itself is fully functional everywhere.
 ### Complete removal (uninstall.sh)
 
 ```sh
-curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/uninstall.sh | bash
+curl -fsSL https://github.com/p1n2o/systemhog/releases/latest/download/uninstall.sh | sudo bash
 ```
 
 Removes every trace, in order:
@@ -252,18 +252,18 @@ LOG_FILE = /var/log/systemhog.log   # root scope; ~/.local/state for user scope
 
 Paths follow the install scope:
 
-| | root / system install | user install |
-| ----- | --------------------- | ------------ |
-| config | `/etc/systemhog/config.conf` | `~/.config/systemhog/config.conf` |
-| lock | `/run/systemhog-<name>.lock` | `$TMPDIR` |
-| log | `/var/log/systemhog.log` | `~/.local/state/systemhog/systemhog.log` |
+|        | root / system install        | user install                             |
+| ------ | ---------------------------- | ---------------------------------------- |
+| config | `/etc/systemhog/config.conf` | `~/.config/systemhog/config.conf`        |
+| lock   | `/run/systemhog-<name>.lock` | `$TMPDIR`                                |
+| log    | `/var/log/systemhog.log`     | `~/.local/state/systemhog/systemhog.log` |
 
-| platform   | default log                               |
-| ---------- | ----------------------------------------- |
+| platform   | default log                                                                       |
+| ---------- | --------------------------------------------------------------------------------- |
 | Linux      | `/var/log/systemhog.log` (root) / `~/.local/state/systemhog/systemhog.log` (user) |
-| macOS      | `~/Library/Logs/systemhog.log`            |
-| Windows    | `%LOCALAPPDATA%\systemhog\systemhog.log`  |
-| other Unix | `$XDG_STATE_HOME/systemhog/systemhog.log` |
+| macOS      | `~/Library/Logs/systemhog.log`                                                    |
+| Windows    | `%LOCALAPPDATA%\systemhog\systemhog.log`                                          |
+| other Unix | `$XDG_STATE_HOME/systemhog/systemhog.log`                                         |
 
 Override with `LOG_FILE` (or the wizard's log-file prompt). A non-writable
 log path falls back to stderr-only logging with a warning. Config edits
