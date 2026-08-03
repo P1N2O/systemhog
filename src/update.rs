@@ -19,32 +19,19 @@ use crate::sys;
 
 const DEFAULT_REPO: &str = "p1n2o/systemhog";
 
-/// Target triple + whether the binary carries a `.exe` suffix, matching
-/// install.sh and the release workflow asset naming exactly.
-fn triple_for(os: &str, arch: &str) -> Result<(String, bool), String> {
-    let (triple, exe) = match os {
-        "linux" => match arch {
-            "x86_64" | "aarch64" | "i686" => (format!("{arch}-unknown-linux-musl"), false),
-            "arm" => ("armv7-unknown-linux-musleabihf".to_string(), false),
-            "riscv64" => ("riscv64gc-unknown-linux-musl".to_string(), false),
-            _ => return Err(format!("unsupported architecture: {arch}")),
-        },
-        "macos" => match arch {
-            "x86_64" | "aarch64" => (format!("{arch}-apple-darwin"), false),
-            _ => return Err(format!("unsupported architecture: {arch}")),
-        },
-        "windows" => match arch {
-            "x86_64" | "aarch64" => (format!("{arch}-pc-windows-msvc"), true),
-            _ => return Err(format!("unsupported architecture: {arch}")),
-        },
-        other => return Err(format!("unsupported OS: {other}")),
-    };
-    Ok((triple, exe))
+/// Target triple for this Linux platform, matching install.sh and the
+/// release workflow asset naming exactly.
+fn triple_for(arch: &str) -> Result<String, String> {
+    match arch {
+        "x86_64" | "aarch64" | "i686" => Ok(format!("{arch}-unknown-linux-musl")),
+        "arm" => Ok("armv7-unknown-linux-musleabihf".to_string()),
+        "riscv64" => Ok("riscv64gc-unknown-linux-musl".to_string()),
+        _ => Err(format!("unsupported architecture: {arch}")),
+    }
 }
 
 fn asset_name() -> Result<String, String> {
-    let (triple, exe) = triple_for(std::env::consts::OS, std::env::consts::ARCH)?;
-    Ok(format!("systemhog-{triple}{}", if exe { ".exe" } else { "" }))
+    Ok(format!("systemhog-{}", triple_for(std::env::consts::ARCH)?))
 }
 
 /// "v0.2.0" / "0.2" -> (0, 2, 0). Pre-release suffixes fail loudly rather
@@ -86,28 +73,16 @@ fn find_latest(repo: &str, asset: &str) -> Result<String, String> {
     Ok(version)
 }
 
-/// SHA-256 of a file, or None when no tool is available. First tool that
-/// works: sha256sum (Linux), shasum (macOS), certutil (Windows).
+/// SHA-256 of a file (sha256sum), or None when the tool is unavailable.
 fn sha256_of(path: &Path) -> Option<String> {
-    let mut tools: Vec<Vec<String>> = vec![
-        vec!["sha256sum".into()],
-        vec!["shasum".into(), "-a".into(), "256".into()],
-        vec!["certutil".into(), "-hashfile".into()],
-    ];
-    for tool in &mut tools {
-        let mut cmd = Command::new(&tool[0]);
-        for a in tool.iter().skip(1) {
-            cmd.arg(a);
-        }
-        cmd.arg(path);
-        if let Ok(out) = cmd.output() {
-            let text = String::from_utf8_lossy(&out.stdout);
-            if let Some(h) = text.split_whitespace().find(|t| t.len() == 64 && t.chars().all(|c| c.is_ascii_hexdigit())) {
-                return Some(h.to_string());
-            }
-        }
+    let out = Command::new("sha256sum").arg(path).output().ok()?;
+    if !out.status.success() {
+        return None;
     }
-    None
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .find(|t| t.len() == 64 && t.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(str::to_string)
 }
 
 /// First whitespace-separated token of a file (the .sha256 asset layout:
@@ -120,12 +95,7 @@ fn first_token(path: &Path) -> Option<String> {
 
 fn magic_ok(path: &Path) -> bool {
     let head = std::fs::read(path).ok().map(|b| b.into_iter().take(4).collect::<Vec<u8>>());
-    match std::env::consts::OS {
-        "linux" => head.as_deref() == Some(&[0x7f, b'E', b'L', b'F']),
-        "macos" => head.as_deref() == Some(&[0xcf, 0xfa, 0xed, 0xfe]),
-        "windows" => head.as_deref().is_some_and(|h| h.starts_with(&[b'M', b'Z'])),
-        _ => true,
-    }
+    head.as_deref() == Some(&[0x7f, b'E', b'L', b'F'])
 }
 
 fn files_equal(a: &Path, b: &Path) -> bool {
@@ -301,7 +271,6 @@ pub fn run(cfg_path: Option<&Path>, check_only: bool) -> i32 {
     println!("  replacing       : {}", exe.display());
     // curl creates the temp file 0644; carry the running binary's
     // permissions (especially the exec bit) over to the replacement.
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if let Ok(meta) = std::fs::metadata(&exe) {
@@ -374,12 +343,11 @@ mod tests {
 
     #[test]
     fn triples_match_release_assets() {
-        assert_eq!(triple_for("linux", "x86_64"), Ok(("x86_64-unknown-linux-musl".into(), false)));
-        assert_eq!(triple_for("linux", "arm"), Ok(("armv7-unknown-linux-musleabihf".into(), false)));
-        assert_eq!(triple_for("linux", "riscv64"), Ok(("riscv64gc-unknown-linux-musl".into(), false)));
-        assert_eq!(triple_for("macos", "aarch64"), Ok(("aarch64-apple-darwin".into(), false)));
-        assert_eq!(triple_for("windows", "x86_64"), Ok(("x86_64-pc-windows-msvc".into(), true)));
-        assert!(triple_for("linux", "mips").is_err());
-        assert!(triple_for("plan9", "x86_64").is_err());
+        assert_eq!(triple_for("x86_64"), Ok("x86_64-unknown-linux-musl".into()));
+        assert_eq!(triple_for("aarch64"), Ok("aarch64-unknown-linux-musl".into()));
+        assert_eq!(triple_for("i686"), Ok("i686-unknown-linux-musl".into()));
+        assert_eq!(triple_for("arm"), Ok("armv7-unknown-linux-musleabihf".into()));
+        assert_eq!(triple_for("riscv64"), Ok("riscv64gc-unknown-linux-musl".into()));
+        assert!(triple_for("mips").is_err());
     }
 }

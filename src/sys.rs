@@ -1,10 +1,9 @@
 //! Platform plumbing: signals, single-instance locking, root detection,
-//! and systemd service management.
+//! and systemd service management. Linux only.
 
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 
-#[cfg(unix)]
 mod imp {
     use super::*;
     use std::os::unix::io::AsRawFd;
@@ -66,33 +65,11 @@ mod imp {
     }
 }
 
-#[cfg(not(unix))]
-mod imp {
-    use super::*;
-
-    pub fn stop_flag() -> &'static AtomicBool {
-        static STOP: AtomicBool = AtomicBool::new(false);
-        &STOP
-    }
-
-    pub fn install_signal_handlers() {}
-
-    pub fn is_root() -> bool {
-        false
-    }
-
-    pub fn uid() -> u32 {
-        0
-    }
-
-    pub fn acquire_lock(_path: &Path) -> Result<Option<std::fs::File>, String> {
-        Ok(None)
-    }
-}
-
 pub use imp::{acquire_lock, install_signal_handlers, is_root, stop_flag, uid};
 
-#[cfg(target_os = "linux")]
+/// systemd service management, system scope only. All operations require
+/// root; every path is the standard system one, so the same binary,
+/// config and log locations are used whether invoked by root or not.
 pub mod systemd {
     use super::*;
     use std::path::PathBuf;
@@ -118,133 +95,49 @@ pub mod systemd {
         }
     }
 
-    fn unit_dir() -> PathBuf {
-        if is_root() {
-            PathBuf::from("/etc/systemd/system")
-        } else {
-            std::env::var_os("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
-                .unwrap_or_else(|| PathBuf::from(".config"))
-                .join("systemd")
-                .join("user")
-        }
-    }
-
     fn unit_path(name: &str) -> PathBuf {
-        unit_dir().join(format!("{name}.service"))
+        PathBuf::from(format!("/etc/systemd/system/{name}.service"))
     }
 
     pub fn install(name: &str, bin: &Path, config: &Path) -> Result<(), String> {
-        let user = !is_root();
-        let dir = unit_dir();
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        if !is_root() {
+            return Err("service installation requires root: run with sudo".into());
+        }
+        std::fs::create_dir_all("/etc/systemd/system")
+            .map_err(|e| format!("cannot create /etc/systemd/system: {e}"))?;
         let unit = unit_path(name);
-        let wanted = if user { "default.target" } else { "multi-user.target" };
         let body = format!(
             "[Unit]\nDescription={name} - CPU and RAM resource maintainer\nAfter=network.target\n\n\
              [Service]\nExecStart={} --config {}\nRestart=always\nRestartSec=5\n\n\
-             [Install]\nWantedBy={}\n",
+             [Install]\nWantedBy=multi-user.target\n",
             bin.display(),
-            config.display(),
-            wanted
+            config.display()
         );
         std::fs::write(&unit, body).map_err(|e| format!("cannot write {}: {e}", unit.display()))?;
-        if user {
-            systemctl(&["--user", "daemon-reload"])?;
-            systemctl(&["--user", "enable", "--now", name])?;
-        } else {
-            systemctl(&["daemon-reload"])?;
-            systemctl(&["enable", "--now", name])?;
-        }
+        systemctl(&["daemon-reload"])?;
+        systemctl(&["enable", "--now", name])?;
         Ok(())
     }
 
     pub fn uninstall(name: &str) -> Result<(), String> {
-        let user = !is_root();
-        if user {
-            let _ = systemctl(&["--user", "disable", "--now", name]);
-        } else {
-            let _ = systemctl(&["disable", "--now", name]);
-        }
+        let _ = systemctl(&["disable", "--now", name]);
         let unit = unit_path(name);
         if unit.exists() {
             std::fs::remove_file(&unit)
                 .map_err(|e| format!("cannot remove {}: {e}", unit.display()))?;
         }
-        if user {
-            systemctl(&["--user", "daemon-reload"])
-        } else {
-            systemctl(&["daemon-reload"])
-        }
+        systemctl(&["daemon-reload"])
     }
 
     pub fn is_active(name: &str) -> String {
-        let args: Vec<String> = if is_root() {
-            vec!["is-active".into(), name.into()]
-        } else {
-            vec!["--user".into(), "is-active".into(), name.into()]
-        };
         Command::new("systemctl")
-            .args(&args)
+            .args(["is-active", name])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_else(|_| "unknown".into())
     }
 
     pub fn restart(name: &str) -> Result<(), String> {
-        if is_root() {
-            systemctl(&["restart", name])
-        } else {
-            systemctl(&["--user", "restart", name])
-        }
-    }
-
-    /// Whether the invoking user's user-manager lingers after logout
-    /// (user services keep running at boot without a login). None when
-    /// logind is unavailable or the answer is unknown.
-    pub fn linger_enabled() -> Option<bool> {
-        let user = std::env::var("USER").ok()?;
-        let out = Command::new("loginctl")
-            .args(["show-user", "-p", "Linger", &user])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        String::from_utf8_lossy(&out.stdout)
-            .trim()
-            .strip_prefix("Linger=")
-            .map(|v| v == "yes")
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-pub mod systemd {
-    use std::path::Path;
-
-    pub fn available() -> bool {
-        false
-    }
-
-    pub fn install(_name: &str, _bin: &Path, _config: &Path) -> Result<(), String> {
-        Err("systemd services are only supported on Linux".into())
-    }
-
-    pub fn uninstall(_name: &str) -> Result<(), String> {
-        Err("systemd services are only supported on Linux".into())
-    }
-
-    pub fn is_active(_name: &str) -> String {
-        "n/a".into()
-    }
-
-    pub fn restart(_name: &str) -> Result<(), String> {
-        Err("systemd services are only supported on Linux".into())
-    }
-
-    pub fn linger_enabled() -> Option<bool> {
-        None
+        systemctl(&["restart", name])
     }
 }

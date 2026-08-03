@@ -53,23 +53,6 @@ jobs:
             target: armv7-unknown-linux-gnueabihf
             flags: -C linker=arm-linux-gnueabihf-gcc
             pkgs: gcc-arm-linux-gnueabihf
-          # Windows / macOS: native runners, native toolchains.
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            flags: ""
-            pkgs: ""
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
-            flags: ""
-            pkgs: ""
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            flags: ""
-            pkgs: ""
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            flags: ""
-            pkgs: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -94,9 +77,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          ext=""
-          [[ "${{ matrix.target }}" == *windows* ]] && ext=".exe"
-          cp "target/${{ matrix.target }}/release/systemhog$ext" "dist/systemhog-${{ matrix.target }}$ext"
+          cp "target/${{ matrix.target }}/release/systemhog" "dist/systemhog-${{ matrix.target }}"
       - uses: actions/upload-artifact@v4
         with:
           name: systemhog-${{ matrix.target }}

@@ -6,8 +6,6 @@
 #   glibc targets  -> dynamically linked (standard glibc practice);
 #                     ARM cross compilers come from tools/cross-toolchains.sh
 #                     (or apt: gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf).
-#
-# Windows/macOS builds are done natively (or via .github/workflows/release.yml).
 set -euo pipefail
 
 cd "$(dirname "$0")"

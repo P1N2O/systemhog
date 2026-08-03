@@ -3,10 +3,9 @@
 # service name — units are matched by their ExecStart pointing at the
 # systemhog binary), kills running processes, and deletes the binary,
 # config, logs, lock files and state, including leftover files from older
-# versions (cpu_maintainer).
+# versions (cpu_maintainer, user-scope installs).
 #
-# Run as root (or with sudo) for system-wide cleanup; as a normal user it
-# removes the user-scope files and escalates (if sudo works) for the rest.
+# Run as root (or with sudo); it escalates for system paths when needed.
 #
 #   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/uninstall.sh | sudo bash
 set -uo pipefail
@@ -37,7 +36,7 @@ if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
 fi
 
 SYSTEM_BINS="/usr/local/bin/systemhog /usr/bin/systemhog /usr/sbin/systemhog"
-USER_BINS="$USER_HOME/.local/bin/systemhog"
+USER_BINS="$USER_HOME/.local/bin/systemhog"  # legacy user-space installs
 
 # --- stop processes -------------------------------------------------------
 say "==> stopping systemhog processes"
@@ -106,9 +105,6 @@ fi
 if [ -e "$USER_HOME/.config/systemhog" ]; then
     rm -rf "$USER_HOME/.config/systemhog" && say "  removed: $USER_HOME/.config/systemhog"
 fi
-if [ -e "$USER_HOME/AppData/Roaming/systemhog" ]; then
-    rm -rf "$USER_HOME/AppData/Roaming/systemhog" && say "  removed: $USER_HOME/AppData/Roaming/systemhog"
-fi
 [ -e /root/cpu_maintainer.py ] && asroot rm -f /root/cpu_maintainer.py
 [ -e /root/cpu_maintainer.conf ] && asroot rm -f /root/cpu_maintainer.conf
 
@@ -122,12 +118,6 @@ if [ -e /var/log/cpu_maintainer.log ]; then
 fi
 if [ -e "$USER_HOME/.local/state/systemhog" ]; then
     rm -rf "$USER_HOME/.local/state/systemhog" && say "  removed: $USER_HOME/.local/state/systemhog"
-fi
-if [ -e "$USER_HOME/Library/Logs/systemhog.log" ]; then
-    rm -f "$USER_HOME/Library/Logs/systemhog.log" && say "  removed: $USER_HOME/Library/Logs/systemhog.log"
-fi
-if [ -e "$USER_HOME/AppData/Local/systemhog" ]; then
-    rm -rf "$USER_HOME/AppData/Local/systemhog" && say "  removed: $USER_HOME/AppData/Local/systemhog"
 fi
 
 # --- lock files -----------------------------------------------------------
@@ -151,12 +141,10 @@ else
     say "  binary: gone"
 fi
 [ -e /etc/systemhog ] && warn "/etc/systemhog still exists" || say "  config: gone"
-[ -e "$USER_HOME/.config/systemhog" ] || [ -e "$USER_HOME/AppData/Roaming/systemhog" ] \
+[ -e "$USER_HOME/.config/systemhog" ] \
     && warn "user config still exists" || say "  user config: gone"
 LOGS_LEFT=""
 [ -e /var/log/systemhog.log ] && LOGS_LEFT="$LOGS_LEFT /var/log/systemhog.log"
-[ -e "$USER_HOME/Library/Logs/systemhog.log" ] && LOGS_LEFT="$LOGS_LEFT $USER_HOME/Library/Logs/systemhog.log"
-[ -e "$USER_HOME/AppData/Local/systemhog" ] && LOGS_LEFT="$LOGS_LEFT $USER_HOME/AppData/Local/systemhog"
 [ -e "$USER_HOME/.local/state/systemhog" ] && LOGS_LEFT="$LOGS_LEFT $USER_HOME/.local/state/systemhog"
 if [ -n "$LOGS_LEFT" ]; then
     warn "logs still exist:$LOGS_LEFT"

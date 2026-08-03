@@ -1,9 +1,5 @@
-//! CPU and RAM sampling, one implementation per OS.
-//!
-//! Linux  : /proc/stat + /proc/meminfo — zero dependencies, no libc.
-//! macOS  : host_statistics64 + sysconf via `libc`.
-//! Windows: GetSystemTimes + GlobalMemoryStatusEx via `windows-sys`.
-//! Other  : metrics report None; the maintainer still runs, it just logs warnings.
+//! CPU and RAM sampling. Linux only: /proc/stat + /proc/meminfo —
+//! zero dependencies, no libc.
 
 /// Cumulative CPU ticks, system-wide.
 #[derive(Debug, Clone, Copy)]
@@ -28,7 +24,6 @@ pub fn cpu_percent(a: &CpuSample, b: &CpuSample) -> f64 {
     }
 }
 
-#[cfg(target_os = "linux")]
 mod imp {
     use super::{CpuSample, MemInfo};
 
@@ -79,120 +74,6 @@ mod imp {
             total_kb: total,
             avail_kb: avail,
         })
-    }
-}
-
-#[cfg(target_os = "macos")]
-mod imp {
-    use super::{CpuSample, MemInfo};
-
-    // libc marks mach_host_self as deprecated ("use mach2"); it is a
-    // trivial thunk, so declare it directly to keep the dependency set
-    // at zero for this platform too.
-    unsafe extern "C" {
-        fn mach_host_self() -> libc::mach_port_t;
-    }
-
-    pub fn cpu_sample() -> Option<CpuSample> {
-        unsafe {
-            let host = mach_host_self();
-            let mut ticks = [0i32; 4]; // user, system, idle, nice
-            let mut count = 4u32;
-            let r = libc::host_statistics64(
-                host,
-                libc::HOST_CPU_LOAD_INFO,
-                ticks.as_mut_ptr(),
-                &mut count,
-            );
-            if r != 0 {
-                return None;
-            }
-            let idle = ticks[2].max(0) as u64;
-            let total = ticks.into_iter().map(|t| t.max(0) as u64).sum();
-            Some(CpuSample { total, idle })
-        }
-    }
-
-    pub fn mem_info() -> Option<MemInfo> {
-        unsafe {
-            let pagesize = libc::sysconf(libc::_SC_PAGESIZE) as u64;
-            let total = libc::sysconf(libc::_SC_PHYS_PAGES) as u64 * pagesize;
-            let host = mach_host_self();
-            let mut stats: libc::vm_statistics64 = std::mem::zeroed();
-            let mut count =
-                (std::mem::size_of::<libc::vm_statistics64>() / std::mem::size_of::<libc::integer_t>())
-                    as u32;
-            let r = libc::host_statistics64(
-                host,
-                libc::HOST_VM_INFO64,
-                &mut stats as *mut _ as *mut libc::integer_t,
-                &mut count,
-            );
-            if r != 0 {
-                return None;
-            }
-            let avail =
-                (stats.free_count + stats.inactive_count + stats.speculative_count) as u64 * pagesize;
-            Some(MemInfo {
-                total_kb: total / 1024,
-                avail_kb: avail / 1024,
-            })
-        }
-    }
-}
-
-#[cfg(windows)]
-mod imp {
-    use super::{CpuSample, MemInfo};
-    use windows_sys::Win32::Foundation::FILETIME;
-    use windows_sys::Win32::System::SystemInformation::{
-        GlobalMemoryStatusEx, MEMORYSTATUSEX,
-    };
-    use windows_sys::Win32::System::Threading::GetSystemTimes;
-
-    fn ft_to_u64(t: FILETIME) -> u64 {
-        ((t.dwHighDateTime as u64) << 32) | t.dwLowDateTime as u64
-    }
-
-    pub fn cpu_sample() -> Option<CpuSample> {
-        let mut idle: FILETIME = unsafe { std::mem::zeroed() };
-        let mut kernel: FILETIME = unsafe { std::mem::zeroed() };
-        let mut user: FILETIME = unsafe { std::mem::zeroed() };
-        let ok = unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) };
-        if ok == 0 {
-            return None;
-        }
-        let (idle, kernel, user) = (ft_to_u64(idle), ft_to_u64(kernel), ft_to_u64(user));
-        Some(CpuSample {
-            total: kernel + user,
-            idle,
-        })
-    }
-
-    pub fn mem_info() -> Option<MemInfo> {
-        let mut m: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
-        m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
-        let ok = unsafe { GlobalMemoryStatusEx(&mut m) };
-        if ok == 0 {
-            return None;
-        }
-        Some(MemInfo {
-            total_kb: m.ullTotalPhys / 1024,
-            avail_kb: m.ullAvailPhys / 1024,
-        })
-    }
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-mod imp {
-    use super::{CpuSample, MemInfo};
-
-    pub fn cpu_sample() -> Option<CpuSample> {
-        None
-    }
-
-    pub fn mem_info() -> Option<MemInfo> {
-        None
     }
 }
 

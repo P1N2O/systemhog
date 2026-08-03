@@ -10,15 +10,14 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// Load the config, printing a consistent error + hint on failure. The
-/// hint adapts to the scope: root installs need sudo, user installs don't.
+/// Load the config, printing a consistent error + hint on failure.
+/// Paths are unified (/etc/systemhog), so setup always needs sudo.
 fn load_config(cfg_path: &Path) -> Result<Config, i32> {
     match config::load(cfg_path) {
         Ok(cfg) => Ok(cfg),
         Err(e) => {
             eprintln!("error: {e}");
-            let init = if sys::is_root() { "sudo systemhog init" } else { "systemhog init" };
-            eprintln!("hint: run `{init}` to create a configuration");
+            eprintln!("hint: run `sudo systemhog init` to create a configuration");
             Err(1)
         }
     }
@@ -157,9 +156,8 @@ pub fn init(args: &[String]) -> i32 {
 
     if let Err(e) = config::write(&cfg_path, &cfg) {
         eprintln!("error: {e}");
-        let init = if sys::is_root() { "sudo systemhog init" } else { "systemhog init" };
         eprintln!(
-            "hint: the config lives at {}; run `{init}` to write it",
+            "hint: the config lives at {}; run `sudo systemhog init` to write it",
             cfg_path.display()
         );
         return 1;
@@ -171,14 +169,9 @@ pub fn init(args: &[String]) -> i32 {
     }
     println!();
     println!("next steps:");
-    println!("  run it now : systemhog --config {}", cfg_path.display());
+    println!("  run it now : sudo systemhog --config {}", cfg_path.display());
     if sys::systemd::available() {
-        let install = if sys::is_root() {
-            "sudo systemhog install"
-        } else {
-            "systemhog install"
-        };
-        println!("  install    : {install} --config {}", cfg_path.display());
+        println!("  install    : sudo systemhog install --config {}", cfg_path.display());
     }
     0
 }
@@ -249,11 +242,6 @@ pub fn install(args: &[String]) -> i32 {
             println!("  config : {}", cfg_path.display());
             println!("  logs   : journalctl -u {} -f", cfg.service_name);
             println!("           tail -f {}", cfg.log_file.display());
-            if !sys::is_root() && sys::systemd::linger_enabled() != Some(true) {
-                println!();
-                println!("note: user services stop at logout; run `sudo loginctl enable-linger`");
-                println!("      to keep `{}` running at boot without a login", cfg.service_name);
-            }
             0
         }
         Err(e) => {
